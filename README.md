@@ -15,7 +15,7 @@ Code to analyze an X-QTL ("extreme QTL") mapping study of malathion resistance i
 
 **File = get_bams_from_founders.txt**
 
-Steps through getting the founder FASTQs from SRA, indexing reference, setting up cluster directory structure, and aligning reads to the reference. Assumes cluster for all steps.
+  - Steps through getting the founder FASTQs from SRA, indexing reference, setting up cluster directory structure, and aligning reads to the reference. Assumes cluster for all steps.
 
 **File = get_haplotype_frequencies.txt**
 
