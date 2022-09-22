@@ -11,8 +11,6 @@ Code to analyze an X-QTL ("extreme QTL") mapping study of malathion resistance i
 
 4. Then move through "get_haplotype_frequencies.txt" to align X-QTL samples to genome (cluster), call SNPs (cluster), call haplotypes (cluster), compare haplotype frequencies between control and selected populations (local machine), and generate the figures from the paper (local machine).
 
-#
-
 ## Walk through steps:
 
 **File = get_bams_from_founders.txt**
@@ -64,6 +62,3 @@ Steps through getting the X-QTL FASTQs from SRA, indexing reference, setting up 
 **haplotyper_cM.sh** = Essentially just runs the "haplotyper_wrapper_cM.R" R script
 
 **QC.freqs.sh** = Largely just runs "QC.freqs.R" R script
-
-#
-
