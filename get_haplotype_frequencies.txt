@@ -1,0 +1,843 @@
+#####################################################
+# 1. GET MALATHION X-QTL FASTQS
+#####################################################
+
+# Or search on SRA
+# Go to
+# https://www.ncbi.nlm.nih.gov/sra
+# Enter PRJNA857080 and search
+
+# Pull down 16 pairs of Read1/Read2 FASTQs
+# - SRR20063676 to SRR20063683
+
+# Code below assumes different file naming
+#
+# So either rename SRA-derived FASTQs based on
+# conversion below, or edit code/scripts
+#
+# SRR20063676	mal-C2M_S4_R1_001.fastq.gz	mal-C2M_S4_R2_001.fastq.gz
+# SRR20063677	mal-C2F_S3_R1_001.fastq.gz	mal-C2F_S3_R2_001.fastq.gz
+# SRR20063678	mal-S2M_S2_R1_001.fastq.gz	mal-S2M_S2_R2_001.fastq.gz
+# SRR20063679	mal-S2F_S1_R1_001.fastq.gz	mal-S2F_S1_R2_001.fastq.gz
+# SRR20063680	mal-C1M_S3_R1_001.fastq.gz	mal-C1M_S3_R2_001.fastq.gz
+# SRR20063681	mal-C1F_S5_R1_001.fastq.gz	mal-C1F_S5_R2_001.fastq.gz
+# SRR20063682	mal-S1M_S4_R1_001.fastq.gz	mal-S1M_S4_R2_001.fastq.gz
+# SRR20063683	mal-S1F_S6_R1_001.fastq.gz	mal-S1F_S6_R2_001.fastq.gz
+
+
+#####################################################
+# 2. GET/INDEX REFERENCE GENOME
+#    - Need bwa
+#####################################################
+
+# Same files used for founder read alignment
+
+
+#####################################################
+# 3. SET UP DIRECTORY STRUCTURE
+#    - Need files:
+#      flymap.r6.txt
+#      founders.txt
+#    - Need shellscripts:
+#      add_genetic_dist.sh
+#      bam2bcf.sh
+#      fq2bam.sh
+#      haplotyper_cM.sh
+#      QC.freqs.sh
+#    - Need R scripts:
+#      add_genetic_dist.R
+#      haplotyper_code_cM.R
+#      haplotyper_wrapper_cM.R
+#      QC.freqs.R
+#####################################################
+
+# Shellscripts and code below assumes a specific
+# structure to the directory
+
+#  /malathion_xqtl
+#  +-- /data
+#  |   +-- /bam
+#  |       +-- /fbam
+#  |           +-- A1.RG.bam
+#  |           +-- A1.RG.bam.bai
+#  |           +-- <and so on to hold all 17 founder bam/bai file pairs - not "B5XAB8">
+#  |       +-- /pbam
+#  |           +-- <initially empty - will hold files produced by scripts>
+#  |   +-- /raw
+#  |       +-- mal-C1F_S5_R1_001.fastq.gz
+#  |       +-- mal-C1F_S5_R2_001.fastq.gz
+#  |       +-- <and so on to hold all 16 *fastq.gz files>
+#  +-- /helperfiles
+#  |   +-- flymap.r6.txt (chr, physical, genetic positions)
+#  |   +-- founders.txt (list of the DSPR pA founders)
+#  +-- /log_files
+#  |   +-- <initially empty - will hold any log files produced by scripts>
+#  +-- /process
+#  |   +-- <initially empty - will hold temporary bams>
+#  +-- /ref
+#  |   +-- dm6.fa
+#  |   +-- <along with other bwa-produced index files>
+#  +-- /scripts
+#  |   +-- add_genetic_dist.R (R script)
+#  |   +-- add_genetic_dist.sh (shellscript)
+#  |   +-- bam2bcf.sh (shellscript)
+#  |   +-- fq2bam.sh (shellscript)
+#  |   +-- haplotyper_cM.sh (shellscript)
+#  |   +-- haplotyper_code_cM.R (R script)
+#  |   +-- haplotyper_wrapper_cM.R (R script)
+#  |   +-- QC.freqs.R (R script)
+#  |   +-- QC.freqs.sh (shellscript)
+
+
+#####################################################
+# 4. ALIGN X-QTL SAMPLE READS TO REFERENCE
+#    - Need bwa, samtools, bcftools
+#####################################################
+
+# CREATE table connecting simple code for each
+# sample to path/filename for all raw FASTQ files
+#
+# Produces
+# ./malathion_xqtl/data/raw/readname.mapping.txt
+
+cd malathion_xqtl/data/raw
+
+ls *R1_001.fastq.gz | awk '{Read1=$1; Read2=$1; SampleID_raw=$1;\
+gsub("R1","R2",Read2);\
+gsub("mal-","",SampleID_raw); split(SampleID_raw,SampleID,"_");\
+printf("%s\tdata/raw/%s\tdata/raw/%s\n",SampleID[1],Read1,Read2)}' > readname.mapping.txt
+
+# ALIGN reads to genome
+
+cd malathion_xqtl/
+sbatch scripts/fq2bam.sh
+
+
+#####################################################
+# 5. CALL SNPS
+#    - Need bcftools, R
+#####################################################
+
+# CREATE a list of all bams
+#
+# Produces
+# ./bams.txt
+# (list of all experiment/founder bams + paths)
+
+cd malathion_xqtl/
+ls data/bam/fbam/*.bam >bams.txt
+ls data/bam/pbam/*.bam >>bams.txt
+
+# RUN SNP calling
+#
+# Produces
+# ./SNPs.txt
+# (REF/ALT counts per SNP per sample)
+
+cd malathion_xqtl/
+sbatch scripts/bam2bcf.sh
+
+# RUN SNP QC script
+#
+# Produces
+# ./FREQ_SNPs.txt
+# ./TOT_SNPs.txt
+# (REF allele frequencies and read counts for filtered set of SNPs)
+
+cd malathion_xqtl/
+sbatch scripts/QC.freqs.sh
+
+
+#####################################################
+# 6. CALL HAPLOTYPES
+#    - Need R, R/limSolve
+#####################################################
+
+# GENERATE FILE containing list of samples to generate haplotypes for
+#
+# Produces
+# ./helperfiles/justhaps.samples.txt
+# (simple list of X-QTL sample IDs)
+
+cd malathion_xqtl/
+ls data/bam/pbam/*.bam | awk '{gsub("data/bam/pbam/","",$1);gsub(".bam","",$1);printf("%s\t%s\n",$1,$1)}' > helperfiles/justhaps.samples.txt
+
+# ADD genetic distance information to ./FREQ_SNPs.txt
+#
+# Produces
+# ./FREQ_SNPs.cM.txt
+
+cd malathion_xqtl/
+sbatch scripts/add_genetic_dist.sh
+
+# RUN haplotyping script for each X-QTL sample
+
+cd malathion_xqtl/
+sbatch scripts/haplotyper_cM.sh helperfiles/justhaps.samples.txt process FREQ_SNPs.cM.txt helperfiles/founders.txt
+
+# PULL everything together in a compressed output file
+
+cd malathion_xqtl/
+dir1="process"
+cat $dir1/C1F.cM_hap_freq.txt | head -n 1 > $dir1/allhaps_cM.txt
+awk FNR-1 $dir1/*.cM_hap_freq.txt >> $dir1/allhaps_cM.txt
+cat $dir1/allhaps_cM.txt | gzip -c > malathion_haps_genetic_1p5cM.txt.gz
+
+
+#####################################################
+# From this point on its easier to not use
+# cluster
+#
+# Just move "malathion_haps_genetic_1p5cM.txt.gz"
+# to local machine
+#####################################################
+
+
+#####################################################
+# 7. LOAD R FUNCTIONS
+#####################################################
+
+# Paste the following 3 functions into a local instance of R
+
+########################
+# ANOVA genomewide scan testing function
+#
+# - Executes an ANOVA on haplotype
+#   frequencies at every position
+########################
+
+ANOVA_test_function = function(df) {
+
+	# INPUT has variables HAP / TRT / REP / asf
+	df = data.frame(df)
+
+	# drop rare haplotypes
+	# roughly those with 2% minor allele frequency
+	# - asin(sqrt(0.02)) = 0.1418971
+	tt = tapply(df$asf,df$HAP,mean)
+	tt2 = names(tt)[tt > 0.14]
+	df3 = df %>% filter(HAP %in% tt2) %>% droplevels()
+	# The specifically-defined 1st model runs out of DF, so get
+	# a 'perfect fit' warning for every test since the error
+	# comes from the last term. If you simply remove it
+	# you get the _exact same results_ without the warnings
+#	out=anova(lm(asf~TRT + HAP + TRT:HAP + TRT:HAP%in%REP, data=df3))
+	out=anova(lm(asf~TRT + HAP + TRT:HAP, data=df3))
+	F=out[3,3]/out[4,3]
+	df1=out[3,1]
+	df2=out[4,1]
+	# Returns -log10(P)
+	-pf(F,df1,df2,lower.tail=FALSE,log.p=TRUE)/log(10)
+}
+
+
+########################
+# PEAK-finding function
+#
+# - Works from smoothed LOD data
+########################
+
+find_peaks = function (x, m) {
+	shape = diff(sign(diff(x, na.pad = FALSE)))
+	pks = sapply(which(shape < 0), FUN = function(i) {
+		z = i - m + 1
+		z = ifelse(z > 0, z, 1)
+		w = i + m + 1
+		w = ifelse(w < length(x), w, length(x))
+		if(all(x[c(z : i, (i + 2) : w)] <= x[i + 1])) return(i + 1) else return(numeric(0))
+	})
+	pks = unlist(pks)
+	pks
+}
+
+
+########################
+# MODIFIED Manhattan plot code
+# specifically for paper genome scan plot
+########################
+
+Make_cM_Manhattan_plot = function(df,Y,myxlab,myylab,mytitle,threshold,ylimit,g1,g2,g3,p1,p2,p3) {
+
+	chrlab=c("X","2L","2R","3L","3R")
+	myY=sym(Y)
+	myX="cMcum"
+	totlen = df %>%
+		mutate(Ichr=recode(CHROM,'chrX'=1,'chr2L'=2,'chr2R'=3,'chr3L'=4,'chr3R'=5)) %>%
+		mutate(IIchr=recode(CHROM,'chrX'=1,'chr2L'=2,'chr2R'=2,'chr3L'=3,'chr3R'=3)) %>%
+		group_by(IIchr) %>% 
+		summarise(chr_len=max(cM)) %>% 
+		# Calculate cumulative position of each chromosome
+		mutate(tot=cumsum(chr_len)-chr_len) %>%
+		select(-chr_len)
+			
+	df2 = df %>% mutate(Ichr=recode(CHROM,'chrX'=1,'chr2L'=2,'chr2R'=3,'chr3L'=4,'chr3R'=5)) %>%
+		mutate(IIchr=recode(CHROM,'chrX'=1,'chr2L'=2,'chr2R'=2,'chr3L'=3,'chr3R'=3)) %>%
+		left_join(totlen, ., by=c("IIchr"="IIchr")) %>%
+		arrange(Ichr, cM) %>%
+		mutate(cMcum=cM+tot)
+		
+	temp = df2 %>%
+		group_by(Ichr) %>% 
+		summarize(center=(max(cMcum) + min(cMcum))/2)
+
+	mycenter = as.numeric(temp$center)
+
+	ggplot(df2, aes_string(x=myX, y=myY)) +
+		ylab(myylab) +
+		xlab(myxlab) +
+		# Show all points
+		geom_point( aes(color=as.factor(Ichr)), alpha=0.8, size=0.3) +
+		scale_color_manual(values = c("#0077BB", "#009988", "#0077BB", "#009988", "#0077BB")) +
+		# threshold
+		{if(threshold != 0) geom_hline(yintercept = threshold, linetype = "dashed", colour = "grey30")} +  
+		
+		# custom X axis:
+		scale_x_continuous(label = chrlab, breaks= mycenter ) +
+		scale_y_continuous(expand = c(0, 0), limits=c(0,ylimit) ) +     # remove space between plot area and x axis
+		# Custom the theme:
+		theme(panel.grid.major=element_blank(),panel.grid.minor=element_blank(),panel.background = element_blank()) + 
+		theme(panel.border = element_rect(fill = NA, color = "black"),axis.text=element_text(size=14,color = "black"),axis.title=element_text(size=14)) +
+		theme(legend.position = "none") +
+		theme(plot.margin = margin(t=20,r=5,b=5,l=5)) +
+
+		# DONE to get the gene annotations OUTSIDE the plot area
+		annotation_custom(g1,xmin=130.731-18,xmax=130.731-18,ymin=ylimit*1.05,ymax=ylimit*1.05) +
+		annotation_custom(g2,xmin=186.158-18,xmax=186.158-18,ymin=ylimit*1.05,ymax=ylimit*1.05) +
+		annotation_custom(g3,xmin=222.643+14,xmax=222.643+14,ymin=ylimit*1.05,ymax=ylimit*1.05) +
+		annotation_custom(p1,xmin=130.731,xmax=130.731,ymin=ylimit*1.05,ymax=ylimit*1.05) +
+		annotation_custom(p2,xmin=186.158,xmax=186.158,ymin=ylimit*1.05,ymax=ylimit*1.05) +
+		annotation_custom(p3,xmin=222.643,xmax=222.643,ymin=ylimit*1.05,ymax=ylimit*1.05) +
+		coord_cartesian(clip = "off")
+}
+
+
+#####################################################
+# 8. GENOME SCAN & QTL ANALYSIS
+#####################################################
+
+# OPEN R
+# R version 4.1.3
+#
+# SET directory where unpacked files reside
+#
+# LOAD necessary libraries
+# tidyverse version 1.3.1
+# ggplot2 version 3.3.6
+# data.table version 1.14.2
+# gridextra version 2.3
+# ggpubr version 0.4.0
+# grid version 4.1.3
+
+setwd("/malathion_xqtl")
+library(tidyverse)
+library(ggplot2)
+library(data.table)
+library(gridExtra)
+library(ggpubr)
+library(grid)
+
+# LOAD functions (above)
+# - ANOVA_test_function
+# - Make_cM_Manhattan_plot
+# - find_peaks
+
+
+########################
+# GENETIC POSITION SCAN
+########################
+
+# READ in haplotype frequency data based on GENETIC POSITION
+haplo_filename = "malathion_haps_genetic_1p5cM.txt.gz"
+haplo_freqs = fread(haplo_filename,header=TRUE)
+
+# TRANSFORM haplotype frequencies
+# - arcsin sqrt
+# - runs very quickly
+haplo_trans_freqs = haplo_freqs %>%
+
+	# ADD a TRT column that is either
+	# - C (Control), or
+	# - S (Selected or Malathion treated)
+	mutate(TRT = str_sub(pool, 1, 1)) %>%
+
+	# ADD a REP column that is 1-4
+	# - Bit artificial; only 2 replicates, but did
+	#   both sexes each time
+	# - So treating M and F ffrom each as separate replicate
+	#   i.e., 1F = 1, 1M = 2, 2F = 3, 2M = 4
+	mutate(REP = as.numeric(as.factor(str_sub(pool,2,3)))) %>%
+
+	# ADD a HAP column that is HAP1-HAP8
+	# - Reflecting A1-AB8
+	mutate(HAP = gsub("B","",gsub("A","HAP",founder))) %>%
+
+	# MAKE HAP, TRT, REP columns factors
+	mutate(HAP = as.factor(HAP)) %>%
+	mutate(TRT = as.factor(TRT)) %>%
+	mutate(REP = as.factor(REP)) %>%
+
+	# TRANSFORM 'freq' column to 'asf' (arcsin sqrt transformed)
+	mutate(asf = asin(sqrt(freq))) %>%
+
+	# REMOVES NA-containing rows
+	# - Since input 'haplo_freqs' above contains NAs for all pools and all
+	#   founders for any given position this has the effect of removing
+	#   entire windows
+	drop_na() %>%
+
+	# REMOVE the pool, founder, and freq columns
+	select(-c(pool,founder,freq))
+
+# ADD column names expected by later sections
+colnames(haplo_trans_freqs) = c("CHROM","POS","cM","TRT","REP","HAP","asf")
+
+
+# EXECUTE ANOVA test for each position
+# - takes a few minutes
+haplo_ANOVA_freq_test_output = haplo_trans_freqs %>%
+
+	# GROUP table
+	# WITHIN each chr/pos "make" a sub-table of the 4 TRT/REP/HAP/asf
+	#   columns, and the 64 rows (8 samples * 8 founders). This sub-table
+	#   is in a 'column' called 'data'
+	#   - Can see one with
+	#     print(haplo_ANOVA_freq_test_output$data[[1]],n=64)
+	group_by(CHROM,POS,cM) %>%
+	nest() %>%
+
+	# DO ANOVA test at every chr/pos
+	mutate(ANOVA_out = map(data, ~ANOVA_test_function(.))) %>%
+
+	# REMOVE the 'data column' (so only retain CHROM, POS, cM, and the ANOVA_out result)
+	select(-data) %>%
+	
+	# GET back to a normal column format, so now
+	#   have CHROM, POS, cM, ANOVA_out
+	unnest(ANOVA_out)
+
+# ADD intuitive column names and output
+colnames(haplo_ANOVA_freq_test_output) = c("CHROM","POS","cM","mlog10p")
+write.table(haplo_ANOVA_freq_test_output,"ANOVA_haplotype_freq_scan_cM.txt")
+
+
+########################
+# MANHATTAN PLOT for paper (Fig 2)
+########################
+
+# GENE positions will be on plot
+#
+# Cyp6g1
+# 2R:12185667..12188431
+# 65.607 cM
+# 130.731 cumulative cM
+#
+# Mdr65
+# 3L:6240500..6245746
+# 16.627 cM
+# 186.158 cumulative cM
+#
+# Ace
+# 3R:13222951..13259517
+# 53.112 cM
+# 222.643 cumulative cM
+
+# LOAD genome scan file
+ANOVA_hap_freq_cM = read.table("ANOVA_haplotype_freq_scan_cM.txt")
+
+# DEFINE positions of candidate genes (and labels)
+p1 <- pointsGrob(x=130.731,y= 5.775,size=unit(0.7,"char"),pch=16,gp=gpar(col="#CC3311"))
+p2 <- pointsGrob(x=186.158,y= 5.775,size=unit(0.7,"char"),pch=16,gp=gpar(col="#CC3311"))
+p3 <- pointsGrob(x=222.643,y= 5.775,size=unit(0.7,"char"),pch=1,gp=gpar(col="grey40"))
+g1 <- textGrob("Cyp6g1",gp=gpar(fontsize=11,fontface = "italic",col="#CC3311"))
+g2 <- textGrob("Mdr65",gp=gpar(fontsize=11,fontface = "italic",col="#CC3311"))
+g3 <- textGrob("Ace",gp=gpar(fontsize=11,fontface = "italic",col="grey40"))
+
+# DEFINE plot
+scan_cm_paper = Make_cM_Manhattan_plot(ANOVA_hap_freq_cM, "mlog10p",
+	"Position (cM)",expression(-log[10]*italic(P)),"ANOVA Hap Freq (cM)",4,5.5,
+	g1,g2,g3,p1,p2,p3)
+
+# OUTPUT as PDF
+pdf("ANOVA_mlog10p_cm_scan_v3.pdf",width=6.5,height=3.5)
+scan_cm_paper
+graphics.off()
+
+
+########################
+# QTL PEAKS / CIs - GENETIC
+########################
+
+# LOAD GENETIC (cM) scan file
+# MAKE 'CHROM' column into a factor
+INFILE = read.table("ANOVA_haplotype_freq_scan_cM.txt")
+INFILE$CHROM <- as.factor(INFILE$CHROM)
+
+# SET "span" value for loess smoothing
+# - Set # desired markers to be used for the fit
+#   - Using 21 as used for physical data above
+# - Arms have different # of markers, so
+#   need arm-specific span values
+# - For this data the number of markers per chromosome arm is:
+#   chrX=1285, chr2L=1013, chr2R=1009, chr3L=921, chr3R=1052
+
+num_markers_for_fit <- 21
+chr_loess_spans <- data.frame(table(INFILE$CHROM))
+chr_loess_spans$spans <- signif(num_markers_for_fit/chr_loess_spans$Freq,3)
+colnames(chr_loess_spans) <- c("chr_ids","num_markers","loess_span_val")
+
+# LOOP through chromosomes
+# SMOOTH LOD scores
+# - And keep in 'outINFILE'
+# FIND hits using smoothed data
+# - Per-chromosome arm list of hits in "ll"
+ll = list()
+outINFILE <- NULL
+for(chr in levels(INFILE$CHROM)){
+	temp = INFILE[INFILE$CHROM==chr,] # EXTRACT 1 chromosome arm of data
+
+	# LOESS smoothing
+	# - degree = 2 (degree of polynomial; can be 1 or 2)
+	# - span = a proportion (If # of points is N and span=0.5, then for given
+	#   position (x) loess will use the 0.5 * N closest datapoints to x for the fit)
+	# - get correct span from 'chr_loess_spans' above
+	# - identical to PHYSICAL analysis except using 'temp$cM'
+	fit1 <- loess(temp$mlog10p ~ temp$cM, degree=2,
+		span = chr_loess_spans[chr_loess_spans$chr_ids==chr,"loess_span_val"], family="symmetric")
+	temp$smooLOD = fit1$fitted
+
+	# KEEP the newly-smoothed dataset
+	outINFILE <- rbind(outINFILE,temp)
+
+	# RUN find_peaks on the smoothed data
+	temphits = temp[find_peaks(temp$smooLOD,20),]  # NOTE the different value vs PHYSICAL analysis
+
+	# KEEP only above threshold hits
+	# - Depending on experimental power, might
+	#   want this value >4 (used 7 for zinc data)
+	crit_thresh <- 4
+	ll[[chr]] = data.frame(temphits[temphits$smooLOD > crit_thresh,])
+}
+
+# WRITE out "outINFILE" 
+write.table(outINFILE,"ANOVA_haplotype_freq_scan_cM_smoo.txt")
+
+#		# PRODUCE plot so its clear the smoother worked well
+#		pdf("ANOVA_cM_smooth.pdf",heigh=10,width=7.5)
+#		par(mfrow=c(5,1))
+#		for(chr in levels(INFILE$CHROM)){
+#			temp = outINFILE[outINFILE$CHROM==chr,]
+#			plot(temp$cM,temp$mlog10p,cex=0.5,main=chr,las=1,
+#				ylab="mlog10P",xlab="Position (cM)",pch=4,col="gray")
+#				lines(temp$cM,temp$smooLOD,col=2,lwd=1.5)
+#		}
+#		graphics.off()
+
+# EXTRACT hits from list into matrix
+# LOOP through hits
+# FIND 3-LOD CIs
+# - Doing this by moving "away" from the peak (left/lower and right/upper)
+#   and finding the last marker where smooLOD is above threshold
+# - One DISADVANTAGE to this is that even if smooLOD goes below
+#   threshold for just 1 marker (before coming up again) this routine
+#   will find that - smaller - interval
+hits = do.call("rbind",ll)
+for(i in 1:nrow(hits)){
+	# EXTRACT hit chromosome from 'outINFILE'
+	# - Contains smoothed data in 'smooLOD' column
+	temp = outINFILE %>% filter(CHROM==hits$CHROM[i])
+
+	# RE-NUMBER rows of 'temp' from 1:N
+	rownames(temp) <- 1:nrow(temp)
+
+	# SET target LOD drop value
+	num_lod_to_drop <- 3
+	target_lod_val <- hits$smooLOD[i]-num_lod_to_drop
+
+	# GET difference between 'target_lod_val' and the smooLOD value for every marker on chromosome
+	# As move away from peak, 1st -ve value (on either side) is the end of the 3-LOD drop
+	temp$LODdiff <- temp$smooLOD-target_lod_val
+
+	# GET upper/right CI position
+	# - get rows of 'temp' where LODdiff is -ve and
+	#   POS is greater than hit POS
+	# - extract # of 1st row; 1 less than this is upper end of interval
+	# - the if/else is there in case the QTL is near the END
+	#   of arm; if it is, returns an NA
+	temp_rows <- temp[temp$LODdiff<0 & temp$POS>hits$POS[i],]
+	if(nrow(temp_rows)==0) {
+		upper_row_id <- NA
+	}
+	else {
+		upper_row_id <- as.numeric(rownames(temp_rows)[1])-1
+	}
+#	upper_row_id <- as.numeric(rownames(temp[temp$LODdiff<0 & temp$POS>hits$POS[i],])[1])-1
+
+	# GET lower/left CI position
+	# - get rows of 'temp' where LODdiff is -ve and
+	#   POS is less than hit POS
+	# - extract max row number; 1 more than this is the lower end of the interval
+	# - the if/else is there in case the QTL is near the START
+	#   of arm; if it is, returns an NA
+	temp_rows <- temp[temp$LODdiff<0 & temp$POS<hits$POS[i],]
+	if(nrow(temp_rows)==0) {
+		lower_row_id <- NA
+	}
+	else {
+		lower_row_id <- max(as.numeric(rownames(temp_rows)))+1
+	}
+#	lower_row_id <- max(as.numeric(rownames(temp[temp$LODdiff<0 & temp$POS<hits$POS[i],])))+1
+
+	# EXTRACT info on these positions
+	CI_info <- temp[c(lower_row_id,upper_row_id),]
+
+	# SPIT out relevant information into 'hits'
+	hits$Left3LOD[i] = CI_info[1,"cM"]
+	hits$Right3LOD[i] = CI_info[2,"cM"]
+	hits$Left3LOD_bp[i] = CI_info[1,"POS"]
+	hits$Right3LOD_bp[i] = CI_info[2,"POS"]
+}
+# GENERATE interval size variables
+hits$IntSize_cM = (hits$Right3LOD - hits$Left3LOD)
+hits$IntSize_bp = (hits$Right3LOD_bp - hits$Left3LOD_bp)
+
+# MANUALLY filter hits
+# - On the one hand the above process is 100% auto and therefore totally defendable
+#   against the idea you "manually" figured out intervals
+# - On the other it will find spurious hits
+# - Here I am essentially looking the LOD plot I produced, and manually
+#   defining which are the QTL hits I care about
+#
+# - For ANOVA-bp this is rows 1 and 2 (the _only_ hits)
+rows_to_keep <- c(1,2)
+qtl <- rep(0,nrow(hits))
+qtl[rows_to_keep] <- 1
+only_hits <- hits[qtl==1,]
+
+# WRITE to file
+write.table(only_hits,"ANOVA_haplotype_freq_scan_cM_QTLhits.txt")
+
+
+# LOOKED up the 2 QTL regions in FlyBase CytoSearch (accessed 24 June 2022)
+#
+# 2R:10966645..13213848 (Genetic-smooth)
+# - 407 genes
+#   - 344 protein-coding
+#   - 63 RNA genes
+# - Cyp6g1 (as seen by PMID: 30190421)
+# - Also includes 6 other P450s (12d1-p, 12d1-d, 6g1, 6g2, 6t3, 301a1, 9h1)
+# - Plus, 15 Cpr (cuticular protein) genes
+#
+# 3L:5515636..6735645 (Genetic-smooth)
+# - 178 genes
+#   - 145 protein-coding
+#   - 33 RNA genes
+# - Plus, 7 Cpr (cuticular protein) genes
+
+
+########################
+# FREQUENCY CHANGE PLOTS (Fig 3)
+########################
+
+# SET filenames
+# READ in haplotype frequency data in GENETIC space
+# READ in QTL hit information
+input_haplo_freq_name <- "malathion_haps_genetic_1p5cM.txt.gz"
+input_qtl_name <- "ANOVA_haplotype_freq_scan_cM_QTLhits.txt"
+haplo_freq = read.table(input_haplo_freq_name,header=TRUE)
+QTL = read.table(input_qtl_name,header=TRUE)
+
+# GET average haplotype frequencies (per founder per position)
+#   for each treatment (Selection / Control)
+# THEN convert to a "Selection minus Control" difference
+haplo_freq_diff_to_plot = haplo_freq %>%
+
+	# GENERATE a TRT (treatment) vector that is simply a single
+	#   letter pulled from the replicate name
+	# REMOVE 'pool' column
+	mutate(TRT = substr(pool,1,1)) %>%
+	select(-pool) %>%
+
+	# GROUP
+	# CALCULATE MEAN of haplotype frequencies (over replicates)
+	#   for each founder and marker interval
+#	group_by(chr,pos,founder,TRT) %>%
+	group_by(chr,cM,founder,TRT) %>%
+	summarize(freq = mean(freq)) %>%
+	
+	# REFORMAT to put the treatment-specific frequencies (per
+	#   founder and position) in separate columns
+	# CALCULATE DIFFERENCE (Selection minus Control)
+	# REMOVE 'C' and 'S' columns
+	pivot_wider(names_from=TRT,values_from=freq) %>%
+	mutate(Diff = S-C) %>%
+	select(-c(S,C))
+
+# CREATE list to hold plot data (1 plot per QTL)
+freq_plot_list = list()
+
+# LOOP through QTL
+for(i in 1:nrow(QTL)) {
+
+	# ISOLATE just the QTL region from 'haplo_freq_diff_to_plot'
+#	qtl_region = haplo_freq_diff_to_plot %>% filter(chr==QTL$CHROM[i] &
+#		pos > QTL$Left3LOD[i] & pos < QTL$Right3LOD[i])
+	qtl_region = haplo_freq_diff_to_plot %>% filter(chr==QTL$CHROM[i] &
+		cM > QTL$Left3LOD[i] & cM < QTL$Right3LOD[i])
+	
+	# GENERATE plot data
+#	freq_plot_list[[i]] = ggplot(qtl_region, aes(x=pos/1000, y=Diff, group=founder)) +
+	freq_plot_list[[i]] = ggplot(qtl_region, aes(x=cM, y=Diff, group=founder)) +
+		# USE se=FALSE for lines without CIs on smoothing
+		# USE se=TRUE  for lines with    CIs on smoothing (BUT
+		#     will also get gray background on legend)
+		geom_smooth(data=qtl_region, method = "loess",
+			aes(color=founder), se=FALSE, show.legend=TRUE) +
+		ylab("Freq Change (Sel-Con)") +
+#		xlab(paste0("Location (kb) on ",QTL$CHROM[i])) +
+		xlab(paste0("Location (cM) on ",QTL$CHROM[i])) +
+		# DRAW vertical black line showing where the QTL peak is
+#		geom_vline(xintercept = QTL$POS[i]/1000, linetype =
+		geom_vline(xintercept = QTL$cM[i], linetype =
+			"dashed", colour = "black") +  
+		theme(panel.grid.major=element_blank(),panel.grid.minor=element_blank(),
+			panel.background = element_blank()) + 
+		theme(panel.border = element_rect(fill = NA, color = "black"),
+			axis.text=element_text(size=8),axis.title=element_text(size=10)) +
+		theme(legend.key = element_rect(colour = "transparent", fill = "transparent"))
+}
+
+# OUTPUT plot
+# - 2 QTL side by side
+# - Legend below
+jpeg("mal_freq_at_qtl_cM.jpeg",
+	width=8,height=4,units="in",res=300,pointsize=12,quality=90)
+ggarrange(freq_plot_list[[1]],freq_plot_list[[2]],
+	ncol=2,nrow=1,common.legend=TRUE,legend="bottom")
+graphics.off()
+
+
+########################
+# SIMILAR FREQUENCY CHANGES OVER SEXES (Fig 4)
+########################
+
+# SET list to hold plottable data
+QTL_data_list <- list()
+
+########################
+# chr2R QTL
+
+# EXTRACT 'raw' haplotype frequencies at a QTL
+QTL_ID <- 1
+#freqs_at_QTL <- haplo_freq[haplo_freq$chr==QTL$CHROM[QTL_ID] & haplo_freq$pos==QTL$POS[QTL_ID],]
+freqs_at_QTL <- haplo_freq[haplo_freq$chr==QTL$CHROM[QTL_ID] & haplo_freq$cM==QTL$cM[QTL_ID],]
+
+# ADD TRT (treatment) and REP (replicate) columns
+freqs_at_QTL_rev = freqs_at_QTL %>%
+	mutate(TRT = substr(pool,1,1)) %>%
+	mutate(REP = substr(pool,2,3))
+
+# EXTRACT "C" and "S" into separate matrices and sort
+freqs_at_QTL_rev_C <- freqs_at_QTL_rev[freqs_at_QTL_rev$TRT=="C",]
+freqs_at_QTL_rev_C <- freqs_at_QTL_rev_C[order(freqs_at_QTL_rev_C$REP,freqs_at_QTL_rev_C$founder),]
+freqs_at_QTL_rev_S <- freqs_at_QTL_rev[freqs_at_QTL_rev$TRT=="S",]
+freqs_at_QTL_rev_S <- freqs_at_QTL_rev_S[order(freqs_at_QTL_rev_S$REP,freqs_at_QTL_rev_S$founder),]
+
+# FIND "S" minus "C" difference
+SminusC <- freqs_at_QTL_rev_S$freq-freqs_at_QTL_rev_C$freq
+freqs_at_QTL_rev_C$diff <- SminusC
+freqs_at_QTL_rev <- freqs_at_QTL_rev_C
+freqs_at_QTL_rev <- freqs_at_QTL_rev[,-c(3,5,6)]
+
+# ADD to list
+QTL_data_list[[QTL_ID]] <- freqs_at_QTL_rev
+
+
+########################
+# chr3L QTL
+
+# EXTRACT 'raw' haplotype frequencies at a QTL
+QTL_ID <- 2
+#freqs_at_QTL <- haplo_freq[haplo_freq$chr==QTL$CHROM[QTL_ID] & haplo_freq$pos==QTL$POS[QTL_ID],]
+freqs_at_QTL <- haplo_freq[haplo_freq$chr==QTL$CHROM[QTL_ID] & haplo_freq$cM==QTL$cM[QTL_ID],]
+
+# ADD TRT (treatment) and REP (replicate) columns
+freqs_at_QTL_rev = freqs_at_QTL %>%
+	mutate(TRT = substr(pool,1,1)) %>%
+	mutate(REP = substr(pool,2,3))
+
+# EXTRACT "C" and "S" into separate matrices and sort
+freqs_at_QTL_rev_C <- freqs_at_QTL_rev[freqs_at_QTL_rev$TRT=="C",]
+freqs_at_QTL_rev_C <- freqs_at_QTL_rev_C[order(freqs_at_QTL_rev_C$REP,freqs_at_QTL_rev_C$founder),]
+freqs_at_QTL_rev_S <- freqs_at_QTL_rev[freqs_at_QTL_rev$TRT=="S",]
+freqs_at_QTL_rev_S <- freqs_at_QTL_rev_S[order(freqs_at_QTL_rev_S$REP,freqs_at_QTL_rev_S$founder),]
+
+# FIND "S" minus "C" difference
+SminusC <- freqs_at_QTL_rev_S$freq-freqs_at_QTL_rev_C$freq
+freqs_at_QTL_rev_C$diff <- SminusC
+freqs_at_QTL_rev <- freqs_at_QTL_rev_C
+freqs_at_QTL_rev <- freqs_at_QTL_rev[,-c(3,5,6)]
+
+# ADD to list
+QTL_data_list[[QTL_ID]] <- freqs_at_QTL_rev
+
+
+########################
+# SET plot fundamentals
+
+# COLORS of founders
+# - library(scales)
+# - hue_pal()(3)
+founder_cols <- c("#F8766D","#CD9600","#7CAE00","#00BE67","#00BFC4","#00A9FF","#C77CFF","#FF61CC")
+founder_cols <- rep(founder_cols,4)
+
+# PCH of replicates (REP)
+# - 1F = open circles
+# - 1M = filled circles
+# - 2F = open triangles
+# - 2M = filled trianges 
+replicate_pch <- c(rep(1,8),rep(16,8),rep(2,8),rep(17,8))
+
+# JITTER the x-axis (i.e. founders)
+plot_founders <- rep(1:8,4)
+offset_val <- 0.1
+plot_founders_jitter <- plot_founders+c((-1*rep(offset_val,16)),(rep(offset_val,16)))
+
+
+########################
+# PLOT
+
+pdf(file="mal_rep_freq_cM.pdf",width=9,height=5)
+#quartz(width=9,height=5)
+par(mfrow=c(1,2))
+plot(plot_founders_jitter,QTL_data_list[[1]]$diff,col=founder_cols,
+	pch=replicate_pch,ylab="Freq Change (Sel-Con)",las=1,
+	xlab="Founders",xaxt="n",main="chr2R QTL")
+axis(side=1,at=1:8,freqs_at_QTL_rev$founder[1:8])
+legend("topleft",pch=c(1,16,2,17),c("F (Rep1)","M (Rep1)","F (Rep2)","M (Rep2)"),bty="n")
+plot(plot_founders_jitter,QTL_data_list[[2]]$diff,col=founder_cols,
+	pch=replicate_pch,ylab=" ",las=1,
+	xlab="Founders",xaxt="n",main="chr3L QTL")
+axis(side=1,at=1:8,freqs_at_QTL_rev$founder[1:8])
+graphics.off()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
