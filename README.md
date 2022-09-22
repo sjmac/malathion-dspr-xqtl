@@ -1,6 +1,8 @@
 # malathion-dspr-xqtl
 Code to analyze an X-QTL ("extreme QTL") mapping study of malathion resistance in a mixed population derived from DSPR (Drosophila Synthetic Population Resource) strains
 
+Notes:
+
 1. Shellscripts assume SLURM cluster scheduler.
 
 2. Even if you use SLURM, header rows in the shellscripts will generally need to be changed to reflect your system.
