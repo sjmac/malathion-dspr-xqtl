@@ -1,7 +1,7 @@
-## malathion-dspr-xqtl
+# malathion-dspr-xqtl
 Code to analyze an X-QTL ("extreme QTL") mapping study of malathion resistance in a mixed population derived from DSPR (Drosophila Synthetic Population Resource) strains
 
-# Notes:
+## Notes:
 
 1. Shellscripts assume SLURM cluster scheduler.
 
@@ -13,17 +13,17 @@ Code to analyze an X-QTL ("extreme QTL") mapping study of malathion resistance i
 
 #
 
-# Brief explanation of files/folders:
+## Brief explanation of files/folders:
 
-Folder = cluster_files_needed (a series of files employed by shellscripts run on cluster)
+**Folder = cluster_files_needed** (a series of files employed by shellscripts run on cluster)
 
-flymap.r6.txt = Physical to genetic position conversion for Release 6 of the Dmel genome
+**flymap.r6.txt** = Physical to genetic position conversion for Release 6 of the Dmel genome
 
-founders.txt = Directs code to only examine the 8 DSPR pA founder strains
+**founders.txt** = Directs code to only examine the 8 DSPR pA founder strains
 
-readname.mapping.2acc.txt = For founder assembly/variant calling for those founders with 2 SRA accessions
+**readname.mapping.2acc.txt** = For founder assembly/variant calling for those founders with 2 SRA accessions
 
-readname.mapping.3acc.txt = For founder assembly/variant calling for those founders with 3 SRA accessions
+**readname.mapping.3acc.txt** = For founder assembly/variant calling for those founders with 3 SRA accessions
 
 #
 
