@@ -1,3 +1,0 @@
-A2ST	raw/SRR457670_1.fastq.gz	raw/SRR457670_2.fastq.gz	raw/SRR457688_1.fastq.gz	raw/SRR457688_2.fastq.gz
-B5XAB8	raw/SRR457672_1.fastq.gz	raw/SRR457672_2.fastq.gz	raw/SRR457709_1.fastq.gz	raw/SRR457709_2.fastq.gz
-B5Xiso1	raw/SRR457679_1.fastq.gz	raw/SRR457679_2.fastq.gz	raw/SRR457699_1.fastq.gz	raw/SRR457699_2.fastq.gz
